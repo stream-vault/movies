@@ -1,32 +1,273 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
-  <meta charset="UTF-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
-  <title>Movie Stream</title>
-  <link rel="stylesheet" href="style.css"/>
+<meta charset="UTF-8" /><meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+<title>StreamWave – Netflix Style</title>
+<style>
+  body {
+    margin: 0; background: #111; color: white;
+    font-family: 'Helvetica Neue', Arial, sans-serif;
+  }
+  header {
+    position: fixed; top: 0; width:100%;
+    z-index:1000; display:flex; align-items:center; justify-content:space-between;
+    padding: 0 20px; height: 60px; transition: background 0.3s;
+  }
+  header.transparent { background: none; }
+  header.solid { background: #141414; }
+  header .logo { height: 40px; }
+  #hero {
+    position: relative; height: 60vh; margin-top: 60px;
+    background-size:cover; background-position:center;
+  }
+  #hero::after {
+    content:""; position:absolute; top:0; left:0; width:100%; height:100%;
+    background: linear-gradient(180deg, rgba(0,0,0,0) 0%, #111 80%);
+  }
+  #hero .hero-content {
+    position:absolute; bottom:40px; left:40px; max-width:40%;
+  }
+  #hero h1 { font-size: 3rem; margin:0 0 1rem; }
+  #hero p { font-size: 1.1rem; max-height:4.4rem; overflow:hidden; margin-bottom:1rem;}
+  .btn { padding:0.5rem 1.5rem; margin-right:10px;
+    background: rgba(51,51,51,0.7); border:none; font-weight:bold;
+    cursor:pointer; transition: background 0.2s; border-radius:3px;
+  }
+  .btn:hover { background: #e6e6e6; color: black; }
+  #lists { padding: 20px; }
+  .list-category { margin-bottom:40px; }
+  .list-category h2 { margin-left:20px; }
+  .carousel {
+    display:flex; overflow-x:auto; padding:20px; gap:10px;
+  }
+  .carousel::-webkit-scrollbar { display:none; }
+  .card { min-width:200px; cursor:pointer; transition:transform .2s; }
+  .card img { width:100%; border-radius:5px; }
+  .card:hover { transform: scale(1.08); }
+  #player-modal { position:fixed; top:0; left:0; width:100%; height:100%;
+    background:rgba(0,0,0,0.9); display:none; justify-content:center; align-items:center;
+    z-index:2000; padding:20px;
+  }
+  .modal-content { background:#222; padding:20px; border-radius:5px; max-width:800px; width:100%; }
+  .close-btn { float:right; font-size:24px; cursor:pointer; }
+  #server-buttons button { margin:5px; background:#444; border:none; padding:8px 12px; border-radius:3px; cursor:pointer; }
+  #server-buttons button:hover { background:#666; }
+  #season-episode-selectors { display:none; text-align:center; margin:10px 0; }
+  #season-episode-selectors select { padding:5px; margin:0 5px; }
+  iframe { width:100%; height:450px; border:none; border-radius:4px; }
+  #controls { position:fixed; top:70px; width:100%; text-align:center; z-index:500; }
+  #controls input, #controls select {
+    padding:8px 12px; border-radius:4px; border:none; margin:5px;
+    max-width:300px;
+  }
+</style>
 </head>
 <body>
-  <header>
-    <h1>🎬 Movie Stream</h1>
-  </header>
+<header class="transparent">
+  <img src="https://i.imgur.com/ab6C9fU.png" class="logo" alt="StreamWave"/>
+  <img src="https://i.imgur.com/8Qf8C7f.png" class="logo" alt="User"/>
+</header>
 
-  <main id="movie-list"></main>
+<section id="hero"></section>
 
-  <div id="player-modal" class="modal">
-    <div class="modal-content">
-      <span class="close-btn">&times;</span>
-      <h2 id="movie-title"></h2>
-      <div id="server-buttons">
-        <button data-server="1">Server 1</button>
-        <button data-server="2">Server 2</button>
-        <button data-server="3">Server 3</button>
-        <button data-server="4">Server 4</button>
-      </div>
-      <iframe id="movie-player" width="100%" height="500" allowfullscreen></iframe>
+<div id="controls">
+  <input type="text" id="search" placeholder="Search movies or TV shows...">
+  <select id="type">
+    <option value="movie">Movies</option>
+    <option value="tv">TV Shows</option>
+  </select>
+</div>
+
+<div id="lists"></div>
+
+<div id="player-modal">
+  <div class="modal-content">
+    <span class="close-btn">&times;</span>
+    <h2 id="movie-title"></h2>
+    <div id="season-episode-selectors">
+      <select id="season-select"></select>
+      <select id="episode-select"></select>
     </div>
+    <div id="server-buttons">
+      <button data-server="1">Server 1</button>
+      <button data-server="2">Server 2</button>
+      <button data-server="3">Server 3</button>
+      <button data-server="4">Server 4</button>
+    </div>
+    <iframe id="movie-player" allowfullscreen></iframe>
   </div>
+</div>
 
-  <script src="script.js"></script>
+<!-- REPLACE your existing <script> block with this -->
+<script>
+const API_KEY = '34b1d9f567ce0d9a84994eda20ee4d01';
+const IMG_PATH = 'https://image.tmdb.org/t/p/original';
+const SMALL_IMG = 'https://image.tmdb.org/t/p/w500';
+
+const header = document.querySelector('header');
+window.addEventListener('scroll', () => {
+  header.classList.toggle('solid', window.scrollY > 100);
+});
+
+const hero = document.getElementById('hero');
+const listsContainer = document.getElementById('lists');
+const searchInput = document.getElementById('search');
+const typeSelect = document.getElementById('type');
+const mod = document.getElementById('player-modal');
+const closeBtn = document.querySelector('.close-btn');
+const titleEl = document.getElementById('movie-title');
+const seasonSel = document.getElementById('season-select');
+const episodeSel = document.getElementById('episode-select');
+const seasonContainer = document.getElementById('season-episode-selectors');
+const iframe = document.getElementById('movie-player');
+const serverButtons = document.querySelectorAll('#server-buttons button');
+
+let current = { id: null, type: 'movie', season: 1, episode: 1 };
+const servers = {
+  movie: {
+    1: id => `https://vidsrc.xyz/embed/movie/${id}/`,
+    2: id => `https://vidfast.pro/movie/${id}/`,
+    3: id => `https://vidlink.pro/movie/${id}`,
+    4: id => `https://player.videasy.net/movie/${id}`
+  },
+  tv: {
+    1: (id, s, e) => `https://vidsrc.to/embed/tv/${id}/${s}-${e}`,
+    2: (id, s, e) => `https://vidfast.pro/tv/${id}/${s}/${e}`,
+    3: (id, s, e) => `https://vidlink.pro/tv/${id}/${s}/${e}`,
+    4: (id, s, e) => `https://player.videasy.net/tv/${id}/${s}/${e}`
+  }
+};
+
+function buildHero(item, type) {
+  const title = item.title || item.name;
+  hero.style.backgroundImage = item.backdrop_path ? `url(${IMG_PATH + item.backdrop_path})` : '';
+  hero.innerHTML = `
+    <div class="hero-content">
+      <h1>${title}</h1>
+      <p>${(item.overview || '').slice(0, 200)}…</p>
+      <button class="btn" onclick="openModal(${item.id},'${type}')">Play</button>
+    </div>`;
+}
+
+function createRow(title, data, type) {
+  const row = document.createElement('div');
+  row.className = 'list-category';
+  row.innerHTML = `<h2>${title}</h2><div class="carousel"></div>`;
+  const carousel = row.querySelector('.carousel');
+  data.forEach(item => {
+    if (!item.poster_path) return;
+    const card = document.createElement('div');
+    card.className = 'card';
+    card.innerHTML = `
+      <img src="${SMALL_IMG + item.poster_path}" alt="${item.title || item.name}">
+      <div></div>`;
+    card.onclick = () => openModal(item.id, type);
+    carousel.appendChild(card);
+  });
+  listsContainer.appendChild(row);
+}
+
+async function loadContent() {
+  listsContainer.innerHTML = '';
+  const type = typeSelect.value;
+  const endpoints = [
+    { key: 'trending', label: 'Trending ' + (type === 'movie' ? 'Movies' : 'TV Shows'), url: `/trending/${type}/week` },
+    { key: 'popular', label: 'Popular', url: `/${type}/popular` },
+    { key: 'top_rated', label: 'Top Rated', url: `/${type}/top_rated` }
+  ];
+  for (let cat of endpoints) {
+    const res = await fetch(`https://api.themoviedb.org/3${cat.url}?api_key=${API_KEY}`);
+    const data = await res.json();
+    createRow(cat.label, data.results || [], type);
+    if (cat.key === 'trending' && data.results.length) buildHero(data.results[0], type);
+  }
+}
+
+async function openModal(id, type) {
+  current = { ...current, id, type };
+  seasonContainer.style.display = (type === 'tv') ? 'block' : 'none';
+  mod.style.display = 'flex';
+
+  const [details, credits, videos] = await Promise.all([
+    fetch(`https://api.themoviedb.org/3/${type}/${id}?api_key=${API_KEY}`).then(r => r.json()),
+    fetch(`https://api.themoviedb.org/3/${type}/${id}/credits?api_key=${API_KEY}`).then(r => r.json()),
+    fetch(`https://api.themoviedb.org/3/${type}/${id}/videos?api_key=${API_KEY}`).then(r => r.json())
+  ]);
+
+  titleEl.innerHTML = `
+    ${details.title || details.name}
+    <span style="font-size:14px; background:#ffc107; color:#000; padding:2px 8px; border-radius:4px; margin-left:10px;">
+      ⭐ ${details.vote_average.toFixed(1)}
+    </span>
+    ${videos.results.length ? `<button class="btn" onclick="window.open('https://www.youtube.com/watch?v=${videos.results[0].key}', '_blank')">Watch Trailer</button>` : ''}
+  `;
+
+  if (type === 'tv') {
+    const seasons = details.seasons.filter(s => s.season_number > 0);
+    seasonSel.innerHTML = seasons.map(s => `<option value="${s.season_number}">Season ${s.season_number}</option>`).join('');
+    loadEpisodes(id, seasons[0].season_number);
+  } else {
+    iframe.src = servers.movie[1](id);
+  }
+
+  if (!document.getElementById('cast-section')) {
+    const castSection = document.createElement('div');
+    castSection.id = 'cast-section';
+    castSection.style = 'margin-top:10px; display:flex; gap:10px; flex-wrap:wrap;';
+    document.querySelector('.modal-content').appendChild(castSection);
+  }
+
+  const castHTML = credits.cast.slice(0, 10).map(actor => `
+    <div style="text-align:center; max-width:80px;">
+      <img src="${actor.profile_path ? SMALL_IMG + actor.profile_path : 'https://via.placeholder.com/80x120'}" style="width:80px; height:120px; object-fit:cover; border-radius:4px;" />
+      <small>${actor.name}</small>
+    </div>
+  `).join('');
+
+  document.getElementById('cast-section').innerHTML = castHTML;
+}
+
+function loadEpisodes(id, season) {
+  current.season = season;
+  fetch(`https://api.themoviedb.org/3/tv/${id}/season/${season}?api_key=${API_KEY}`)
+    .then(r => r.json())
+    .then(sdata => {
+      episodeSel.innerHTML = sdata.episodes.map(ep => `<option value="${ep.episode_number}">Ep ${ep.episode_number} - ${ep.name}</option>`).join('');
+      current.episode = sdata.episodes[0].episode_number;
+      iframe.src = servers.tv[1](id, season, current.episode);
+    });
+}
+
+seasonSel.addEventListener('change', e => loadEpisodes(current.id, e.target.value));
+episodeSel.addEventListener('change', e => {
+  current.episode = e.target.value;
+  iframe.src = servers.tv[1](current.id, current.season, current.episode);
+});
+serverButtons.forEach(btn => btn.onclick = () => {
+  iframe.src = (current.type === 'movie')
+    ? servers.movie[btn.dataset.server](current.id)
+    : servers.tv[btn.dataset.server](current.id, current.season, current.episode);
+});
+closeBtn.onclick = () => { mod.style.display = 'none'; iframe.src = ''; };
+window.onclick = e => { if (e.target === mod) { mod.style.display = 'none'; iframe.src = ''; } };
+
+searchInput.addEventListener('input', () => {
+  const q = searchInput.value.trim();
+  if (q.length > 1) {
+    fetch(`https://api.themoviedb.org/3/search/${typeSelect.value}?api_key=${API_KEY}&query=` + encodeURIComponent(q))
+      .then(r => r.json()).then(({ results }) => {
+        listsContainer.innerHTML = '';
+        createRow('Search', results, typeSelect.value);
+      });
+  } else loadContent();
+});
+typeSelect.addEventListener('change', () => {
+  searchInput.value = '';
+  loadContent();
+});
+
+loadContent();
+</script>
+
 </body>
 </html>
